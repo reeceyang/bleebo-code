@@ -1,0 +1,12 @@
+[package]
+name = "bleebo-code"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+dialoguer = { version = "0.12.0", features = ["fuzzy-select"] }
+serde = { version = "1.0.228", features = ["derive"] }
+slug = "0.1.6"
+toml = "1.1.2"
