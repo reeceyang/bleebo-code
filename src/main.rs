@@ -17,11 +17,15 @@ struct Config {
     repos: HashMap<String, Repo>,
 }
 
+#[derive(PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+struct WorkspaceSlug(String);
+
 #[derive(Serialize, Deserialize)]
 struct Repo {
     base_directory: PathBuf,
     all_workspaces: PathBuf,
-    workspaces: HashMap<String, Workspace>,
+    workspaces: HashMap<WorkspaceSlug, Workspace>,
     workspace_init_command: Option<String>,
 }
 
@@ -82,6 +86,14 @@ fn get_current_repo_slug(config: &Config) -> anyhow::Result<String> {
     anyhow::bail!("Not currently in a repo");
 }
 
+fn get_current_repo(config: &mut Config) -> anyhow::Result<&mut Repo> {
+    let repo_slug = get_current_repo_slug(&config)?;
+    config
+        .repos
+        .get_mut(&repo_slug)
+        .context("Could not get repo from slug {repo_slug}")
+}
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -108,6 +120,9 @@ enum Commands {
 
     /// Open the config file using $EDITOR
     Config,
+
+    /// Edit the current change in the main workspace
+    Spotlight,
 }
 
 fn command_init(mut config: Config, name: &String) -> anyhow::Result<()> {
@@ -128,18 +143,14 @@ fn command_init(mut config: Config, name: &String) -> anyhow::Result<()> {
 }
 
 fn command_new(mut config: Config, parent: Option<&str>) -> anyhow::Result<()> {
-    let repo_slug = get_current_repo_slug(&config)?;
-    let repo = config
-        .repos
-        .get_mut(&repo_slug)
-        .context("Could not get repo from slug {repo_slug}")?;
+    let repo = get_current_repo(&mut config)?;
     let description: String = Input::new()
         .with_prompt("pls describe new workspace")
         .interact_text()?;
-    let workspace_slug = slugify(description.clone());
+    let workspace_slug = WorkspaceSlug(slugify(description.clone()));
     let workspace_directory: PathBuf = repo
         .all_workspaces
-        .join(PathBuf::from(workspace_slug.clone()));
+        .join(PathBuf::from(workspace_slug.0.clone()));
     let workspace_directory_str = workspace_directory
         .to_str()
         .context("Failed to convert workspace directory to str")?;
@@ -219,12 +230,8 @@ impl Display for Workspace {
     }
 }
 
-fn command_list(config: Config) -> anyhow::Result<()> {
-    let repo_slug = get_current_repo_slug(&config)?;
-    let repo = config
-        .repos
-        .get(&repo_slug)
-        .context("Could not get repo from slug {repo_slug}")?;
+fn command_list(mut config: Config) -> anyhow::Result<()> {
+    let repo = get_current_repo(&mut config)?;
     let workspaces: Vec<&Workspace> = repo.workspaces.values().collect();
     let selection = FuzzySelect::new()
         .with_prompt("select a workspace")
@@ -245,9 +252,29 @@ fn command_list(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn command_config() -> anyhow::Result<()> {
+fn command_config() -> anyhow::Result<()> {
     let config_path = config_path()?;
     println!("{}", config_path.display());
+    Ok(())
+}
+
+fn command_spotlight(mut config: Config) -> anyhow::Result<()> {
+    let output = Command::new("jj")
+        .args(["show", "-T", "change_id"])
+        .output()?;
+    let change_id: String = String::from_utf8(output.stdout)?.trim().parse()?;
+
+    let output = Command::new("jj").args(["new", "-r", "trunk()"]).output()?;
+    print!("{}", String::from_utf8(output.stderr.clone())?);
+
+    let repo = get_current_repo(&mut config)?;
+
+    let output = Command::new("jj")
+        .current_dir(&repo.base_directory)
+        .args(["edit", &change_id])
+        .output()?;
+    print!("{}", String::from_utf8(output.stderr.clone())?);
+
     Ok(())
 }
 
@@ -260,5 +287,6 @@ fn main() -> anyhow::Result<()> {
         Commands::New { parent } => command_new(config, parent.as_deref()),
         Commands::List => command_list(config),
         Commands::Config => command_config(),
+        Commands::Spotlight => command_spotlight(config),
     }
 }
