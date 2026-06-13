@@ -22,6 +22,7 @@ struct Repo {
     base_directory: PathBuf,
     all_workspaces: PathBuf,
     workspaces: HashMap<String, Workspace>,
+    workspace_init_command: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,6 +105,9 @@ enum Commands {
 
     /// Select a workspace in the current repo to switch into
     List,
+
+    /// Open the config file using $EDITOR
+    Config,
 }
 
 fn command_init(mut config: Config, name: &String) -> anyhow::Result<()> {
@@ -116,6 +120,7 @@ fn command_init(mut config: Config, name: &String) -> anyhow::Result<()> {
         base_directory: current_dir()?,
         all_workspaces,
         workspaces: HashMap::new(),
+        workspace_init_command: None,
     };
     config.repos.insert(slug, repo);
     put_config(config)?;
@@ -169,11 +174,20 @@ fn command_new(mut config: Config, parent: Option<&str>) -> anyhow::Result<()> {
 
     let tab_id: u32 = String::from_utf8(output.stdout)?.trim().parse()?;
 
+    if let Some(init_command) = repo.workspace_init_command.clone() {
+        let output = Command::new("sh")
+            .current_dir(&workspace_directory)
+            .args(["-c", &init_command])
+            .output()?;
+        print!("{}", String::from_utf8(output.stderr.clone())?);
+    }
+
     let workspace = Workspace {
         directory: workspace_directory,
         tab_id: Some(tab_id),
         description,
     };
+
     repo.workspaces.insert(workspace_slug, workspace);
     put_config(config)?;
 
@@ -220,6 +234,12 @@ fn command_list(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn command_config() -> anyhow::Result<()> {
+    let config_path = config_path()?;
+    println!("{}", config_path.display());
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let config = get_or_create_config().context("Failed to read config")?;
     let cli = Cli::parse();
@@ -228,5 +248,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Init { name } => command_init(config, name),
         Commands::New { parent } => command_new(config, parent.as_deref()),
         Commands::List => command_list(config),
+        Commands::Config => command_config(),
     }
 }
