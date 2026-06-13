@@ -174,6 +174,17 @@ fn command_new(mut config: Config, parent: Option<&str>) -> anyhow::Result<()> {
 
     let tab_id: u32 = String::from_utf8(output.stdout)?.trim().parse()?;
 
+    let output = Command::new("zellij")
+        .args([
+            "action",
+            "rename-tab",
+            "--tab-id",
+            &tab_id.to_string(),
+            &description,
+        ])
+        .output()?;
+    print!("{}", String::from_utf8(output.stderr.clone())?);
+
     if let Some(init_command) = repo.workspace_init_command.clone() {
         let output = Command::new("sh")
             .current_dir(&workspace_directory)
